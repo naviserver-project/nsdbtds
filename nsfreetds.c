@@ -323,7 +323,10 @@ int Db_Msg_Handler(TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *)tds->parent;
 
-    Ns_Log(Notice, "Db_Msg_Handler(%s): %s",handle->datasource,msg->message);
+    Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d): %s",
+           handle->datasource,msg->msg_level,msg->msg_state,msg->message);
+    if(msg->msg_level > 10)
+       Ns_DbSetException(handle, "NSDB", msg->message);
     return 0;
 }
 
