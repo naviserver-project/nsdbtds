@@ -1,7 +1,7 @@
 /*
  * FreeTDS internal driver for NaviServer 4.x
  *
- * Requires FreeTDS version 0.63+
+ * Requires FreeTDS version 0.64+
  *
  * Vlad Seryakov vlad@crystalballinc.com
  *
@@ -48,8 +48,8 @@ static int Db_Exec(Ns_DbHandle *handle,char *sql);
 static Ns_Set *Db_BindRow(Ns_DbHandle *handle);
 static int Db_SpStart(Ns_DbHandle *handle,char *procname);
 static int Db_SpExec(Ns_DbHandle *handle);
-static int Db_Msg_Handler(TDSCONTEXT *,TDSSOCKET *,TDSMESSAGE *);
-static int Db_Err_Handler(TDSCONTEXT *,TDSSOCKET *tds,TDSMESSAGE *);
+static int Db_Msg_Handler(const TDSCONTEXT *,TDSSOCKET *,TDSMESSAGE *);
+static int Db_Err_Handler(const TDSCONTEXT *,TDSSOCKET *tds,TDSMESSAGE *);
 
 static Ns_DbProc freetdsProcs[] = {
     { DbFn_Name,         Db_Name },
@@ -114,7 +114,7 @@ Db_OpenDb(Ns_DbHandle *handle)
     Db_Handle *nsdb;
 
     login = tds_alloc_login();
-    context = tds_alloc_context();
+    context = tds_alloc_context(0);
     tds = tds_alloc_socket(context,512);
 
     if(context->locale && !context->locale->date_fmt)
@@ -172,53 +172,40 @@ Db_CloseDb(Ns_DbHandle *handle)
 static int
 Db_Exec(Ns_DbHandle *handle, char *sql)
 {
-    int rc, done = 0;
+    int status = TDS_SUCCEED, rc = NS_DML, done = 0;
     TDS_INT resulttype;
 
-    Db_Flush(handle);
+    Db_Cancel(handle);
 
     if(tds_submit_query(GET_TDS(handle),sql) != TDS_SUCCEED) {
       Ns_Log(Error, "Db_Exec(%s): tds_submit_query failed.", handle->datasource);
       return NS_ERROR;
     }
-    handle->statement = NULL;
-    handle->fetchingRows = 0;
-
-    while(1) {
-      rc = tds_process_result_tokens(GET_TDS(handle),&resulttype,&done);
-      switch(rc) {
-       case TDS_SUCCEED:
-          if(done == TDS_DONE_ERROR || done == TDS_DONE_SRVERROR) {
-            return NS_ERROR;
-          }
-          switch(resulttype) {
-           case TDS_NO_MORE_RESULTS:
-               return NS_DML;
-           case TDS_DONE_RESULT:
-           case TDS_DONEPROC_RESULT:
-           case TDS_DONEINPROC_RESULT:
-           case TDS_ROWFMT_RESULT:
-           case TDS_ROW_RESULT:
-           case TDS_COMPUTE_RESULT:
-           default:
-               if((handle->statement = (void *)GET_TDS(handle)->res_info)) {
-                 handle->fetchingRows = 1;
-                 return NS_ROWS;
-               }
-               break;
-          }
-          break;
-       case TDS_NO_MORE_RESULTS:
-          if(done == TDS_DONE_ERROR || done == TDS_DONE_SRVERROR) {
-            return NS_ERROR;
-          }
-          return NS_DML;
-       case TDS_FAIL:
-       case TDS_ERROR:
-          return NS_ERROR;
+    while(status == TDS_SUCCEED) {
+      status = tds_process_tokens(GET_TDS(handle),&resulttype,&done,TDS_TOKEN_RESULTS);
+      switch(resulttype) {
+       case TDS_DONE_RESULT:
+       case TDS_DONEPROC_RESULT:
+       case TDS_DONEINPROC_RESULT:
+           status = done & TDS_DONE_ERROR ? TDS_FAIL : TDS_NO_MORE_RESULTS;
+           break;
+       case TDS_ROW_RESULT:
+       case TDS_COMPUTE_RESULT:
+           handle->statement = (void *)GET_TDS(handle)->res_info;
+           if(rc != NS_ERROR && handle->statement) {
+              handle->fetchingRows = 1;
+              rc = NS_ROWS;
+              status = TDS_NO_MORE_RESULTS;
+           }
+           break;
       }
     }
-    return NS_DML;
+    if((status != TDS_SUCCEED && status != TDS_NO_MORE_RESULTS) || handle->dsExceptionMsg.length) {
+       handle->statement = NULL;
+       handle->fetchingRows = 1;
+       return NS_ERROR;
+    }
+    return rc;
 }
 
 static int
@@ -228,28 +215,32 @@ Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
     TDSCOLUMN *col;
     CONV_RESULT dres;
     unsigned char *src;
-    TDS_INT srclen,rowtype,computeid;
+    TDS_INT srclen,resulttype,computeid;
 
-    if(!handle->fetchingRows) {
-      Ns_Log(Error,"Db_GetRow(%s):  No rows waiting to fetch.",handle->datasource);
-      Ns_DbSetException(handle,"NSDB","no rows waiting to fetch.");
+    if(!handle->fetchingRows || !handle->row->size) {
+      Ns_DbSetException(handle,"NSDB","no rows waiting to fetch");
       return NS_ERROR;
     }
-
-    if((rc = tds_process_row_tokens(GET_TDS(handle),&rowtype,&computeid)) != TDS_SUCCEED ||
-       GET_TDS(handle)->res_info == 0 ||
-       GET_TDS(handle)->res_info->num_cols == 0 ||
-       handle->row->size == 0) {
+    rc = tds_process_tokens(GET_TDS(handle),&resulttype,&computeid,TDS_STOPAT_ROWFMT|TDS_RETURN_DONE|TDS_RETURN_ROW|TDS_RETURN_COMPUTE);
+    if(rc != TDS_SUCCEED && rc != TDS_NO_MORE_RESULTS) {
+      Ns_Log(Error,"Db_GetRow(%s): tds_process_row_tokens: %d",handle->datasource,rc);
+      Db_Cancel(handle);
+      return NS_ERROR;
+    }
+    if(rc == TDS_NO_MORE_RESULTS || 
+       !GET_TDS(handle)->res_info ||
+       !GET_TDS(handle)->current_results ||
+       (resulttype != TDS_ROW_RESULT && resulttype != TDS_COMPUTE_RESULT)) {
       handle->statement = NULL;
       handle->fetchingRows = 0;
       return NS_END_DATA;
     }
     for(i = 0; i < GET_TDS(handle)->res_info->num_cols; i++) {
-      if(tds_get_null(GET_TDS(handle)->res_info->current_row,i)) {
+      col = GET_TDS(handle)->res_info->columns[i];
+      if(col->column_cur_size < 0) {
         Ns_SetPutValue(row,i,"");
         continue;
       }
-      col = GET_TDS(handle)->res_info->columns[i];
       ctype = tds_get_conversion_type(col->column_type,col->column_size);
       src = &(GET_TDS(handle)->res_info->current_row[col->column_offset]);
       if(is_blob_type(col->column_type)) src = (unsigned char *)((TDSBLOB *)src)->textvalue;
@@ -274,6 +265,9 @@ Db_Flush(Ns_DbHandle *handle)
 static int
 Db_Cancel(Ns_DbHandle *handle)
 {
+    if(handle->fetchingRows) {
+       tds_process_simple_query(GET_TDS(handle));
+    }
     tds_free_all_results(GET_TDS(handle));
     tds_send_cancel(GET_TDS(handle));
     tds_process_cancel(GET_TDS(handle));
@@ -309,7 +303,7 @@ Db_SpExec(Ns_DbHandle *handle)
 }
 
 
-int Db_Err_Handler(TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
+int Db_Err_Handler(const TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *)tds->parent;
 
@@ -319,12 +313,13 @@ int Db_Err_Handler(TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
     return 0;
 }
 
-int Db_Msg_Handler(TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
+int Db_Msg_Handler(const TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *)tds->parent;
 
-    Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d): %s",
-           handle->datasource,msg->msg_level,msg->msg_state,msg->message);
+    Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d,%s): %s",
+           handle->datasource,msg->msg_level,msg->msg_state,
+           msg->sql_state ? msg->sql_state : "0",msg->message);
     if(msg->msg_level > 10)
        Ns_DbSetException(handle, "NSDB", msg->message);
     return 0;
