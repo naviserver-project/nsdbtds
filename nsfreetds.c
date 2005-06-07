@@ -117,8 +117,9 @@ Db_OpenDb(Ns_DbHandle *handle)
     context = tds_alloc_context(0);
     tds = tds_alloc_socket(context,512);
 
-    if(context->locale && !context->locale->date_fmt)
+    if(context->locale && !context->locale->date_fmt) {
       context->locale->date_fmt = strdup("%Y-%m-%d %T");
+    }
 
     context->msg_handler = Db_Msg_Handler;
     context->err_handler = Db_Err_Handler;
@@ -175,11 +176,13 @@ Db_Exec(Ns_DbHandle *handle, char *sql)
     int status = TDS_SUCCEED, rc = NS_DML, done = 0;
     TDS_INT resulttype;
 
-    Db_Cancel(handle);
+    if(Db_Cancel(handle) == NS_ERROR) {
+       return NS_ERROR;
+    }
 
     if(tds_submit_query(GET_TDS(handle),sql) != TDS_SUCCEED) {
-      Ns_Log(Error, "Db_Exec(%s): tds_submit_query failed.", handle->datasource);
-      return NS_ERROR;
+       Ns_Log(Error, "Db_Exec(%s): tds_submit_query failed.", handle->datasource);
+       return NS_ERROR;
     }
     while(status == TDS_SUCCEED) {
       status = tds_process_tokens(GET_TDS(handle),&resulttype,&done,TDS_TOKEN_RESULTS);
@@ -187,9 +190,10 @@ Db_Exec(Ns_DbHandle *handle, char *sql)
        case TDS_DONE_RESULT:
        case TDS_DONEPROC_RESULT:
        case TDS_DONEINPROC_RESULT:
-           status = done & TDS_DONE_ERROR ? TDS_FAIL : TDS_NO_MORE_RESULTS;
+           if(done & TDS_DONE_ERROR) status = TDS_FAIL;
            break;
        case TDS_ROW_RESULT:
+       case TDS_ROWFMT_RESULT: 
        case TDS_COMPUTE_RESULT:
            handle->statement = (void *)GET_TDS(handle)->res_info;
            if(rc != NS_ERROR && handle->statement) {
@@ -199,6 +203,7 @@ Db_Exec(Ns_DbHandle *handle, char *sql)
            }
            break;
       }
+      
     }
     if((status != TDS_SUCCEED && status != TDS_NO_MORE_RESULTS) || handle->dsExceptionMsg.length) {
        handle->statement = NULL;
@@ -218,14 +223,14 @@ Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
     TDS_INT srclen,resulttype,computeid;
 
     if(!handle->fetchingRows || !handle->row->size) {
-      Ns_DbSetException(handle,"NSDB","no rows waiting to fetch");
-      return NS_ERROR;
+       Ns_DbSetException(handle,"NSDB","no rows waiting to fetch");
+       return NS_ERROR;
     }
     rc = tds_process_tokens(GET_TDS(handle),&resulttype,&computeid,TDS_STOPAT_ROWFMT|TDS_RETURN_DONE|TDS_RETURN_ROW|TDS_RETURN_COMPUTE);
     if(rc != TDS_SUCCEED && rc != TDS_NO_MORE_RESULTS) {
-      Ns_Log(Error,"Db_GetRow(%s): tds_process_row_tokens: %d",handle->datasource,rc);
-      Db_Cancel(handle);
-      return NS_ERROR;
+       Ns_Log(Error,"Db_GetRow(%s): tds_process_row_tokens: %d",handle->datasource,rc);
+       Db_Cancel(handle);
+       return NS_ERROR;
     }
     if(rc == TDS_NO_MORE_RESULTS || 
        !GET_TDS(handle)->res_info ||
@@ -258,15 +263,21 @@ Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
 static int
 Db_Flush(Ns_DbHandle *handle)
 {
-    Db_Cancel(handle);
-    return NS_OK;
+    return Db_Cancel(handle);
 }
 
 static int
 Db_Cancel(Ns_DbHandle *handle)
 {
-    if(handle->fetchingRows) {
-       tds_process_simple_query(GET_TDS(handle));
+    if(IS_TDSDEAD(GET_TDS(handle))) {
+       Ns_Log(Error, "Db_Cancel(%s): dead connection detected.", handle->datasource);
+       handle->statement = NULL;
+       handle->fetchingRows = 0;
+       handle->connected = NS_FALSE;
+       return NS_ERROR;
+    }
+    if(tds_process_simple_query(GET_TDS(handle)) == TDS_FAIL) {
+       Ns_Log(Error,"Db_Cancel(%s): tds_process_simple_query failed",handle->datasource);
     }
     tds_free_all_results(GET_TDS(handle));
     tds_send_cancel(GET_TDS(handle));
@@ -282,8 +293,9 @@ Db_BindRow(Ns_DbHandle *handle)
     int i;
 
     if(GET_TDS_RESULTS(handle)) {
-      for(i = 0; i < GET_TDS_RESULTS(handle)->num_cols; i++)
+      for(i = 0; i < GET_TDS_RESULTS(handle)->num_cols; i++) {
         Ns_SetPut((Ns_Set *)handle->row,GET_TDS_RESULTS(handle)->columns[i]->column_name,NULL);
+      }
     }
     return (Ns_Set *)handle->row;
 }
@@ -291,14 +303,18 @@ Db_BindRow(Ns_DbHandle *handle)
 static int
 Db_SpStart(Ns_DbHandle *handle, char *procname)
 {
-    if(Db_Exec(handle, procname) != NS_ERROR) return NS_OK;
+    if(Db_Exec(handle, procname) != NS_ERROR) {
+       return NS_OK;
+    }
     return NS_ERROR;
 }
 
 static int
 Db_SpExec(Ns_DbHandle *handle)
 {
-    if(GET_TDS(handle)->res_info == NULL) return NS_DML;
+    if(GET_TDS(handle)->res_info == NULL) {
+       return NS_DML;
+    }
     return NS_ROWS;
 }
 
@@ -317,11 +333,14 @@ int Db_Msg_Handler(const TDSCONTEXT *ctx,TDSSOCKET *tds,TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *)tds->parent;
 
-    Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d,%s): %s",
-           handle->datasource,msg->msg_level,msg->msg_state,
-           msg->sql_state ? msg->sql_state : "0",msg->message);
-    if(msg->msg_level > 10)
+    if(handle->verbose) {
+       Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d,%s): %s",
+              handle->datasource,msg->msg_level,msg->msg_state,
+              msg->sql_state ? msg->sql_state : "0",msg->message);
+    }
+    if(msg->msg_level > 10) {
        Ns_DbSetException(handle, "NSDB", msg->message);
+    }
     return 0;
 }
 
