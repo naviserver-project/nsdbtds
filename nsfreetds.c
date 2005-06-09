@@ -249,6 +249,7 @@ Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
     rc = tds_process_tokens(GET_TDS(handle),&resulttype,&computeid,TDS_STOPAT_ROWFMT|TDS_RETURN_DONE|TDS_RETURN_ROW|TDS_RETURN_COMPUTE);
     if(rc != TDS_SUCCEED && rc != TDS_NO_MORE_RESULTS) {
        Ns_Log(Error,"Db_GetRow(%s): tds_process_row_tokens: %d",handle->datasource,rc);
+       Db_Cancel(handle);
        return NS_ERROR;
     }
     if(rc == TDS_NO_MORE_RESULTS || 
@@ -290,6 +291,7 @@ Db_Cancel(Ns_DbHandle *handle)
 {
     if(IS_TDSDEAD(GET_TDS(handle))) {
        Ns_Log(Error, "Db_Cancel(%s): dead connection detected.", handle->datasource);
+       tds_free_all_results(GET_TDS(handle));
        handle->statement = NULL;
        handle->fetchingRows = 0;
        handle->connected = NS_FALSE;
