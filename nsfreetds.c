@@ -382,12 +382,13 @@ Db_Rows_Affected(Tcl_Interp *interp, Ns_DbHandle *handle)
 static int
 Db_Cmd(ClientData arg,Tcl_Interp *interp,int objc,Tcl_Obj * CONST objv[])
 {
+    int cmd;
     Ns_DbHandle *handle;
     enum commands {
         cmdRowsAffected, cmdVersion
-    } cmd;
+    };
 
-    static char *sCmd[] = {
+    static const char *sCmd[] = {
         "rows_affected", "version",
         0
     };
