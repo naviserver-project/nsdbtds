@@ -6,12 +6,12 @@ endif
 #
 # Module name
 #
-MOD       =  nsfreetds.so
+MOD       =  nsdbtds.so
 
 #
 # Objects to build.
 #
-OBJS      =  nsfreetds.o
+OBJS      =  nsdbtds.o
 
 #
 # Set this to be the installation prefix of your FreeTDS installation.
