@@ -1,3 +1,7 @@
+2005-08-01  Vlad Seryakov  <seryakov@users.sf.net>
+
+	* nsdbtds.c: removed old compat functions
+
 2005-06-16  Vlad Seryakov  <seryakov@users.sf.net>
 
 	* nsdbtds.c: initial commit with new name

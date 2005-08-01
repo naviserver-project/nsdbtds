@@ -88,10 +88,10 @@ static Ns_DbProc freetdsProcs[] = {
 };
 
 
-DllExport int Ns_ModuleVersion = 1;
-DllExport int Ns_ModuleFlags = 0;
+NS_EXPORT int Ns_ModuleVersion = 1;
+NS_EXPORT int Ns_ModuleFlags = 0;
 
-DllExport int
+NS_EXPORT int
 Ns_DbDriverInit(char *hDriver, char *configPath)
 {
     if(hDriver == NULL) {
@@ -430,7 +430,8 @@ Db_InterpInit(Tcl_Interp *interp, void *ignored)
 static int
 Db_ServerInit(char *hServer, char *hModule, char *hDriver)
 {
-    return Ns_TclInitInterps(hServer, Db_InterpInit, NULL);
+    Ns_TclRegisterTrace(hServer, Db_InterpInit, NULL, NS_TCL_TRACE_CREATE);
+    return NS_OK;
 }
 
 
