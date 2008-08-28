@@ -26,12 +26,12 @@ HDRS     =
 #
 # Extra libraries
 #
-MODLIBS  =  -L$(FREETDS_HOME)/lib -ltds
+MODLIBS  =  -L$(FREETDS_HOME)/lib -ltds -lreplacements
 
 #
 # Compiler flags
 #
-CFLAGS   = -I$(FREETDS_HOME)/include
+CFLAGS   = -I$(FREETDS_HOME)/include -I/usr/include/freetds
 
 
 include  $(NAVISERVER)/include/Makefile.module

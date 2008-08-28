@@ -65,6 +65,8 @@ static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row);
 static int Db_Flush(Ns_DbHandle * handle);
 static int Db_Cancel(Ns_DbHandle * handle);
 static int Db_Exec(Ns_DbHandle * handle, char *sql);
+static int Db_IsDead(Ns_DbHandle * handle);
+static int Db_GetRowCount(Ns_DbHandle * handle);
 static Ns_Set *Db_BindRow(Ns_DbHandle * handle);
 static int Db_SpStart(Ns_DbHandle * handle, char *procname);
 static int Db_SpExec(Ns_DbHandle * handle);
@@ -78,6 +80,7 @@ static Ns_DbProc freetdsProcs[] = {
     {DbFn_OpenDb, Db_OpenDb},
     {DbFn_CloseDb, Db_CloseDb},
     {DbFn_GetRow, Db_GetRow},
+    {DbFn_GetRowCount, Db_GetRowCount},
     {DbFn_Flush, Db_Flush},
     {DbFn_Cancel, Db_Cancel},
     {DbFn_Exec, (void *) Db_Exec},
@@ -115,12 +118,12 @@ static char *Db_Name(void)
 }
 
 
-static char *Db_DbType(Ns_DbHandle * handle)
+static char *Db_DbType(Ns_DbHandle *handle)
 {
     return TDS_VERSION_NO;
 }
 
-static int Db_OpenDb(Ns_DbHandle * handle)
+static int Db_OpenDb(Ns_DbHandle *handle)
 {
     TDSSOCKET *tds;
     TDSLOGIN *login;
@@ -171,7 +174,7 @@ static int Db_OpenDb(Ns_DbHandle * handle)
     return NS_OK;
 }
 
-static int Db_CloseDb(Ns_DbHandle * handle)
+static int Db_CloseDb(Ns_DbHandle *handle)
 {
     Db_Cancel(handle);
 
@@ -185,7 +188,20 @@ static int Db_CloseDb(Ns_DbHandle * handle)
     return NS_OK;
 }
 
-static int Db_Exec(Ns_DbHandle * handle, char *sql)
+static int Db_IsDead(Ns_DbHandle *handle)
+{
+    if (IS_TDSDEAD(GET_TDS(handle))) {
+        Ns_Log(Error, "%s: dead connection detected.", handle->datasource);
+        tds_free_all_results(GET_TDS(handle));
+        handle->statement = NULL;
+        handle->fetchingRows = 0;
+        handle->connected = NS_FALSE;
+        return 1;
+    }
+    return 0;
+}
+
+static int Db_Exec(Ns_DbHandle *handle, char *sql)
 {
     int status = TDS_SUCCEED, rc = NS_DML, done = 0;
     TDS_INT resulttype;
@@ -228,7 +244,7 @@ static int Db_Exec(Ns_DbHandle * handle, char *sql)
     return rc;
 }
 
-static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row)
+static int Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
 {
     int i, rc, ctype;
     TDSCOLUMN *col;
@@ -247,9 +263,8 @@ static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row)
         Db_Cancel(handle);
         return NS_ERROR;
     }
-    if (rc == TDS_NO_MORE_RESULTS ||
-        !GET_TDS(handle)->res_info ||
-        !GET_TDS(handle)->current_results || (resulttype != TDS_ROW_RESULT && resulttype != TDS_COMPUTE_RESULT)) {
+    if (rc == TDS_NO_MORE_RESULTS || !GET_TDS(handle)->res_info || !GET_TDS(handle)->current_results ||
+        (resulttype != TDS_ROW_RESULT && resulttype != TDS_COMPUTE_RESULT)) {
         handle->statement = NULL;
         handle->fetchingRows = 0;
         return NS_END_DATA;
@@ -261,9 +276,11 @@ static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row)
             continue;
         }
         ctype = tds_get_conversion_type(col->column_type, col->column_size);
-        src = &(GET_TDS(handle)->res_info->current_row[col->column_offset]);
-        if (is_blob_type(col->column_type))
+        //src = &(GET_TDS(handle)->res_info->current_row[col->column_offset]);
+        src = col->column_data;
+        if (is_blob_type(col->column_type)) {
             src = (unsigned char *) ((TDSBLOB *) src)->textvalue;
+        }
         srclen = col->column_cur_size;
         if (tds_convert(GET_TDS(handle)->tds_ctx, ctype, (TDS_CHAR *) src, srclen, SYBVARCHAR, &dres) < 0) {
             Ns_SetPutValue(row, i, "");
@@ -275,19 +292,14 @@ static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row)
     return NS_OK;
 }
 
-static int Db_Flush(Ns_DbHandle * handle)
+static int Db_Flush(Ns_DbHandle *handle)
 {
     return Db_Cancel(handle);
 }
 
-static int Db_Cancel(Ns_DbHandle * handle)
+static int Db_Cancel(Ns_DbHandle *handle)
 {
-    if (IS_TDSDEAD(GET_TDS(handle))) {
-        Ns_Log(Error, "Db_Cancel(%s): dead connection detected.", handle->datasource);
-        tds_free_all_results(GET_TDS(handle));
-        handle->statement = NULL;
-        handle->fetchingRows = 0;
-        handle->connected = NS_FALSE;
+    if (Db_IsDead(handle)) {
         return NS_ERROR;
     }
     if (tds_process_simple_query(GET_TDS(handle)) == TDS_FAIL) {
@@ -301,7 +313,15 @@ static int Db_Cancel(Ns_DbHandle * handle)
     return NS_OK;
 }
 
-static Ns_Set *Db_BindRow(Ns_DbHandle * handle)
+static int Db_GetRowCount(Ns_DbHandle *handle)
+{
+    if (Db_IsDead(handle)) {
+        return NS_ERROR;
+    }
+    return GET_TDS(handle)->rows_affected;
+}
+
+static Ns_Set *Db_BindRow(Ns_DbHandle *handle)
 {
     int i;
 
@@ -313,7 +333,7 @@ static Ns_Set *Db_BindRow(Ns_DbHandle * handle)
     return (Ns_Set *) handle->row;
 }
 
-static int Db_SpStart(Ns_DbHandle * handle, char *procname)
+static int Db_SpStart(Ns_DbHandle *handle, char *procname)
 {
     if (Db_Exec(handle, procname) != NS_ERROR) {
         return NS_OK;
@@ -321,7 +341,7 @@ static int Db_SpStart(Ns_DbHandle * handle, char *procname)
     return NS_ERROR;
 }
 
-static int Db_SpExec(Ns_DbHandle * handle)
+static int Db_SpExec(Ns_DbHandle *handle)
 {
     if (GET_TDS(handle)->res_info == NULL) {
         return NS_DML;
@@ -330,35 +350,28 @@ static int Db_SpExec(Ns_DbHandle * handle)
 }
 
 
-int Db_Err_Handler(const TDSCONTEXT * ctx, TDSSOCKET * tds, TDSMESSAGE * msg)
+int Db_Err_Handler(const TDSCONTEXT *ctx, TDSSOCKET *tds, TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *) tds->parent;
 
-    Ns_Log(Error, "Db_Err_Handler(%s): ERR(%u:%u) %s", handle->datasource, msg->msg_number, msg->line_number, msg->message);
+    Ns_Log(Error, "Db_Err_Handler(%s): ERR(%u:%u) %s", handle->datasource, msg->msgno, msg->line_number, msg->message);
     Ns_DbSetException(handle, "NSDB", msg->message);
     return 0;
 }
 
-int Db_Msg_Handler(const TDSCONTEXT * ctx, TDSSOCKET * tds, TDSMESSAGE * msg)
+int Db_Msg_Handler(const TDSCONTEXT *ctx, TDSSOCKET *tds, TDSMESSAGE *msg)
 {
     Ns_DbHandle *handle = (Ns_DbHandle *) tds->parent;
 
     if (handle->verbose) {
         Ns_Log(Notice, "Db_Msg_Handler(%s:%d,%d,%s): %s",
-               handle->datasource, msg->msg_level, msg->msg_state, msg->sql_state ? msg->sql_state : "0", msg->message);
+               handle->datasource, msg->severity, msg->state, msg->sql_state ? msg->sql_state : "0", msg->message);
     }
-    if (msg->msg_level > 10) {
+    if (msg->severity > 10) {
         Ns_DbSetException(handle, "NSDB", msg->message);
     }
     return 0;
 }
-
-
-static void Db_Rows_Affected(Tcl_Interp * interp, Ns_DbHandle * handle)
-{
-    Tcl_SetObjResult(interp, Tcl_NewLongObj(GET_TDS(handle)->rows_affected));
-}
-
 
 /*
  * Db_Cmd - This function implements the "ns_freetds" Tcl command
@@ -398,8 +411,9 @@ static int Db_Cmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST
 
     switch (cmd) {
     case cmdRowsAffected:
-        Db_Rows_Affected(interp, handle);
+        Tcl_SetObjResult(interp, Tcl_NewLongObj(GET_TDS(handle)->rows_affected));
         break;
+
     case cmdVersion:
         Tcl_SetResult(interp, freetds_driver_version, TCL_STATIC);
         break;

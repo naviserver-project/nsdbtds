@@ -1,3 +1,7 @@
+2008-08-28  Vlad Seryakov  <seryakov@users.sf.net>
+
+        * Updated to FreeTDS 0.82, new rowcount API function
+
 2005-08-01  Vlad Seryakov  <seryakov@users.sf.net>
 
 	* nsdbtds.c: removed old compat functions
