@@ -117,10 +117,9 @@ static char *Db_Name(void)
     return freetds_driver_name;
 }
 
-
-static char *Db_DbType(Ns_DbHandle *handle)
+static char *Db_DbType(Ns_DbHandle * handle)
 {
-    return TDS_VERSION_NO;
+    return freetds_driver_name;
 }
 
 static int Db_OpenDb(Ns_DbHandle *handle)
@@ -142,7 +141,7 @@ static int Db_OpenDb(Ns_DbHandle *handle)
     context->msg_handler = Db_Msg_Handler;
     context->err_handler = Db_Err_Handler;
 
-    tds_set_app(login, Db_Name());
+    tds_set_app(login, freetds_driver_name);
     tds_set_server(login, handle->datasource);
     tds_set_user(login, handle->user);
     tds_set_passwd(login, handle->password);
