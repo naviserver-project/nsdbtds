@@ -30,8 +30,11 @@
 
 #include "ns.h"
 #include "nsdb.h"
-#include "tds.h"
-#include "tdsconvert.h"
+#include "config.h"
+#include "freetds/tds.h"
+#include "freetds/convert.h"
+#include "freetds/data.h"
+#include "freetds/string.h"
 
 typedef struct {
     TDSSOCKET *tds;
@@ -93,8 +96,10 @@ static Ns_DbProc freetdsProcs[] = {
 
 NS_EXPORT int Ns_ModuleVersion = 1;
 NS_EXPORT int Ns_ModuleFlags = 0;
+NS_EXPORT NsDb_DriverInitProc Ns_DbDriverInit;
 
-NS_EXPORT int Ns_DbDriverInit(char *hDriver, char *configPath)
+NS_EXPORT Ns_ReturnCode
+Ns_DbDriverInit(const char *hDriver, const char *configPath)
 {
     if (hDriver == NULL) {
         Ns_Log(Bug, "Db_DriverInit():  NULL driver name.");
@@ -127,10 +132,10 @@ static int Db_OpenDb(Ns_DbHandle *handle)
     TDSSOCKET *tds;
     TDSLOGIN *login;
     TDSCONTEXT *context;
-    TDSCONNECTION *connect;
+    TDSLOGIN *connect;
     Db_Handle *nsdb;
 
-    login = tds_alloc_login();
+    login = tds_alloc_login(0);
     context = tds_alloc_context(0);
     tds = tds_alloc_socket(context, 512);
 
@@ -153,10 +158,10 @@ static int Db_OpenDb(Ns_DbHandle *handle)
 
     connect = tds_read_config_info(NULL, login, context->locale);
 
-    if (!connect || tds_connect(tds, connect) == TDS_FAIL) {;
+    if (!connect || tds_connect_and_login(tds, connect) == TDS_FAIL) {;
         Ns_Log(Notice, "Db_OpenDb(%s): tds_connect() failed.", handle->datasource);
         if (connect)
-            tds_free_connection(connect);
+            tds_free_login(connect);
         tds_free_socket(tds);
         tds_free_login(login);
         tds_free_context(context);
@@ -202,18 +207,18 @@ static int Db_IsDead(Ns_DbHandle *handle)
 
 static int Db_Exec(Ns_DbHandle *handle, char *sql)
 {
-    int status = TDS_SUCCEED, rc = NS_DML, done = 0;
+    int status = TDS_SUCCESS, rc = NS_DML, done = 0;
     TDS_INT resulttype;
 
     if (Db_Cancel(handle) == NS_ERROR) {
         return NS_ERROR;
     }
 
-    if (tds_submit_query(GET_TDS(handle), sql) != TDS_SUCCEED) {
+    if (tds_submit_query(GET_TDS(handle), sql) != TDS_SUCCESS) {
         Ns_Log(Error, "Db_Exec(%s): tds_submit_query failed.", handle->datasource);
         return NS_ERROR;
     }
-    while (status == TDS_SUCCEED) {
+    while (status == TDS_SUCCESS) {
         status = tds_process_tokens(GET_TDS(handle), &resulttype, &done, TDS_TOKEN_RESULTS);
         switch (resulttype) {
         case TDS_DONE_RESULT:
@@ -235,7 +240,7 @@ static int Db_Exec(Ns_DbHandle *handle, char *sql)
         }
 
     }
-    if ((status != TDS_SUCCEED && status != TDS_NO_MORE_RESULTS) || handle->dsExceptionMsg.length) {
+    if ((status != TDS_SUCCESS && status != TDS_NO_MORE_RESULTS) || handle->dsExceptionMsg.length) {
         handle->statement = NULL;
         handle->fetchingRows = 1;
         return NS_ERROR;
@@ -257,7 +262,7 @@ static int Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
     }
     rc = tds_process_tokens(GET_TDS(handle), &resulttype, &computeid,
                             TDS_STOPAT_ROWFMT | TDS_RETURN_DONE | TDS_RETURN_ROW | TDS_RETURN_COMPUTE);
-    if (rc != TDS_SUCCEED && rc != TDS_NO_MORE_RESULTS) {
+    if (rc != TDS_SUCCESS && rc != TDS_NO_MORE_RESULTS) {
         Ns_Log(Error, "Db_GetRow(%s): tds_process_row_tokens: %d", handle->datasource, rc);
         Db_Cancel(handle);
         return NS_ERROR;
@@ -281,7 +286,7 @@ static int Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
             src = (unsigned char *) ((TDSBLOB *) src)->textvalue;
         }
         srclen = col->column_cur_size;
-        if (tds_convert(GET_TDS(handle)->tds_ctx, ctype, (TDS_CHAR *) src, srclen, SYBVARCHAR, &dres) < 0) {
+        if (tds_convert(GET_TDS(handle)->conn->tds_ctx, ctype, (TDS_CHAR *) src, srclen, SYBVARCHAR, &dres) < 0) {
             Ns_SetPutValue(row, i, "");
             continue;
         }
@@ -326,7 +331,7 @@ static Ns_Set *Db_BindRow(Ns_DbHandle *handle)
 
     if (GET_TDS_RESULTS(handle)) {
         for (i = 0; i < GET_TDS_RESULTS(handle)->num_cols; i++) {
-            Ns_SetPut((Ns_Set *) handle->row, GET_TDS_RESULTS(handle)->columns[i]->column_name, NULL);
+            Ns_SetPut((Ns_Set *) handle->row, tds_dstr_cstr(&GET_TDS_RESULTS(handle)->columns[i]->column_name), NULL);
         }
     }
     return (Ns_Set *) handle->row;
