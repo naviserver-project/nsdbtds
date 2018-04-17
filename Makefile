@@ -25,8 +25,9 @@ HDRS     =
 
 #
 # Extra libraries
-#
-MODLIBS  =  -L$(FREETDS_HOME)/lib -ltds -lreplacements
+# Since FreeTDS 0.82 the libtds.so is neither built or installed so now we need paths to the static libraries, also libnsdb is required
+
+MODLIBS  =  -L$(FREETDS_HOME)/lib -L$(FREETDS_HOME)/src/replacements/.libs/ -L$(FREETDS_HOME)/src/tds/.libs/ -ltds -lreplacements -lnsdb -lpq
 
 #
 # Compiler flags
