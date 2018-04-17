@@ -6,6 +6,7 @@ endif
 #
 # Module name
 #
+MODNAME   =  nsdbtds
 MOD       =  nsdbtds.so
 
 #
