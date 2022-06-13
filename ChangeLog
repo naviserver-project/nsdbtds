@@ -1,12 +1,132 @@
-2008-08-28  Vlad Seryakov  <seryakov@users.sf.net>
+commit 888a269534b34a70970c2c761fd37e894a858d35
+Author: Brendan Graves <bgraves@mindoka.com>
+Date:   2018-04-17
 
-        * Updated to FreeTDS 0.82, new rowcount API function
+    Added MODNAME to Makefile
 
-2005-08-01  Vlad Seryakov  <seryakov@users.sf.net>
+M	Makefile
 
-	* nsdbtds.c: removed old compat functions
+commit f3fdd3e3b175ba58e61e84e9fe759da4b13faaf3
+Author: Brendan Graves <bgraves@mindoka.com>
+Date:   2018-04-17
 
-2005-06-16  Vlad Seryakov  <seryakov@users.sf.net>
+    Changed to work with FreeTDS 1.00.86
 
-	* nsdbtds.c: initial commit with new name
+M	nsdbtds.c
 
+commit 522b0d5397e36c634c5e13f44796770b6e209bf2
+Author: Brendan Graves <bgraves@mindoka.com>
+Date:   2018-04-17
+
+    Paths to required libraries have changed
+
+M	Makefile
+
+commit 0c2cf81ac887c4ee545ef5876f4cabead3d8cd9f
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2008-09-10
+
+    Make dbtype call compatible with other db drivers
+
+M	nsdbtds.c
+
+commit f4ced6bbbc36bea0a2d51a886fcbb0eb8cef158f
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2008-08-28
+
+    Add new API call rowcount and function Ns_DbGetRowCount to return number of affected rows
+
+M	ChangeLog
+M	Makefile
+M	nsdbtds.c
+
+commit 1c4e0bd6cd5199c91e8954e38bd9bfb135212e7e
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2006-06-16
+
+    Run sources through indent
+
+M	nsdbtds.c
+
+commit ce57b1b0f779d10e9e4dbfece31d8bdf12f52800
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-08-01
+
+    Remove old compat functions
+
+M	ChangeLog
+M	nsdbtds.c
+
+commit d0fca2f5936e92605a4fbf37fca4dbea8a6eb93f
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-06-17
+
+    Rename files according to new nsdb convention
+
+A	ChangeLog
+M	Makefile
+R100	nsfreetds.c	nsdbtds.c
+
+commit 84f810be7f8ac3d87899245c561f44c6ea207e0f
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-06-13
+
+    Silence more compiler warnings
+
+M	nsfreetds.c
+
+commit 9168e7b556dac122f3c48637d450202c58675e3e
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-06-09
+
+    Cancel pending row result on error in GetRow
+
+M	nsfreetds.c
+
+commit f854a63f1be4f022dc0b78dd57f75d5c9a232118
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-06-08
+
+    Change license and wording in README files
+
+A	LICENSE
+A	README
+M	nsfreetds.c
+
+commit ccf1bbd45fcac81f77ff1d23eacd200494e4567f
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-06-07
+
+    Detect dead connections; support FreeTDS 0.64
+    
+    Thanks to Ian Harding for the dead-connection fix.
+
+M	nsfreetds.c
+
+commit f2b1cab709cbffbc23dec2d9532b9feafc6766fd
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-05-26
+
+    Update to FreeTDS 0.64+ and fixed error handling
+
+M	nsfreetds.c
+
+commit 23cfd39fd0eea4161f5c11266d823ca0fa701ebc
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-05-25
+
+    FreeTDS 0.63 error handling fix
+    
+    Needs setting DB exception inside the message handler
+    because FreeTDS does not return error condition.
+
+M	nsfreetds.c
+
+commit 2193d80a85a386a2e037374c7f1a54b918590d1b
+Author: Vlad Seryakov <vlad@crystalballinc.com>
+Date:   2005-05-24
+
+    Initial revision
+
+A	Makefile
+A	nsfreetds.c
