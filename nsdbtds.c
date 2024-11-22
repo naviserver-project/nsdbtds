@@ -30,11 +30,17 @@
 
 #include "ns.h"
 #include "nsdb.h"
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+
 #include "config.h"
 #include "freetds/tds.h"
 #include "freetds/convert.h"
 #include "freetds/data.h"
-#include "freetds/string.h"
+// #include "freetds/string.h"
 
 typedef struct {
     TDSSOCKET *tds;
@@ -59,37 +65,39 @@ typedef struct {
 static char *freetds_driver_name = "nsfreetds";
 static char *freetds_driver_version = "FreeTDS Driver v0.5";
 
-static char *Db_Name(void);
-static char *Db_DbType(Ns_DbHandle * handle);
-static int Db_ServerInit(char *hServer, char *hModule, char *hDriver);
-static int Db_OpenDb(Ns_DbHandle * handle);
-static int Db_CloseDb(Ns_DbHandle * handle);
-static int Db_GetRow(Ns_DbHandle * handle, Ns_Set * row);
-static int Db_Flush(Ns_DbHandle * handle);
-static int Db_Cancel(Ns_DbHandle * handle);
-static int Db_Exec(Ns_DbHandle * handle, char *sql);
+extern Ns_ReturnCode Db_ServerInit(const char *server, const char *module, const char *driver);
+
+static const char   *Db_Name(void);
+static const char   *Db_DbType(Ns_DbHandle *handle);
+static Ns_ReturnCode Db_OpenDb(Ns_DbHandle *handle)      NS_GNUC_NONNULL(1);
+static Ns_ReturnCode Db_CloseDb(Ns_DbHandle *handle)     NS_GNUC_NONNULL(1);
+static Ns_Set       *Db_BindRow(Ns_DbHandle *handle)     NS_GNUC_NONNULL(1);
+static int           Db_Exec(Ns_DbHandle *handle, const char *sql)  NS_GNUC_NONNULL(1) NS_GNUC_NONNULL(2);
+static int           Db_GetRow(Ns_DbHandle *handle, Ns_Set *row) NS_GNUC_NONNULL(1);
+static int           Db_GetRowCount(Ns_DbHandle *handle) NS_GNUC_NONNULL(1);
+static Ns_ReturnCode Db_Flush(Ns_DbHandle *handle)       NS_GNUC_NONNULL(1);
+static Ns_ReturnCode Db_Cancel(Ns_DbHandle *handle)      NS_GNUC_NONNULL(1);
+static Ns_ReturnCode Db_SpStart(Ns_DbHandle *handle, const char *procname) NS_GNUC_NONNULL(1) NS_GNUC_NONNULL(2);
+static int           Db_SpExec(Ns_DbHandle *handle)      NS_GNUC_NONNULL(1);
+
 static int Db_IsDead(Ns_DbHandle * handle);
-static int Db_GetRowCount(Ns_DbHandle * handle);
-static Ns_Set *Db_BindRow(Ns_DbHandle * handle);
-static int Db_SpStart(Ns_DbHandle * handle, char *procname);
-static int Db_SpExec(Ns_DbHandle * handle);
 static int Db_Msg_Handler(const TDSCONTEXT *, TDSSOCKET *, TDSMESSAGE *);
 static int Db_Err_Handler(const TDSCONTEXT *, TDSSOCKET * tds, TDSMESSAGE *);
 
 static Ns_DbProc freetdsProcs[] = {
-    {DbFn_Name, Db_Name},
-    {DbFn_DbType, Db_DbType},
-    {DbFn_ServerInit, (void *) Db_ServerInit},
-    {DbFn_OpenDb, Db_OpenDb},
-    {DbFn_CloseDb, Db_CloseDb},
-    {DbFn_GetRow, Db_GetRow},
-    {DbFn_GetRowCount, Db_GetRowCount},
-    {DbFn_Flush, Db_Flush},
-    {DbFn_Cancel, Db_Cancel},
-    {DbFn_Exec, (void *) Db_Exec},
-    {DbFn_BindRow, (void *) Db_BindRow},
-    {DbFn_SpStart, Db_SpStart},
-    {DbFn_SpExec, Db_SpExec},
+    {DbFn_Name,        (ns_funcptr_t)Db_Name},
+    {DbFn_DbType,      (ns_funcptr_t)Db_DbType},
+    {DbFn_ServerInit,  (ns_funcptr_t)Db_ServerInit},
+    {DbFn_OpenDb,      (ns_funcptr_t)Db_OpenDb},
+    {DbFn_CloseDb,     (ns_funcptr_t)Db_CloseDb},
+    {DbFn_GetRow,      (ns_funcptr_t)Db_GetRow},
+    {DbFn_GetRowCount, (ns_funcptr_t)Db_GetRowCount},
+    {DbFn_Flush,       (ns_funcptr_t)Db_Flush},
+    {DbFn_Cancel,      (ns_funcptr_t)Db_Cancel},
+    {DbFn_Exec,        (void *) Db_Exec},
+    {DbFn_BindRow,     (void *) Db_BindRow},
+    {DbFn_SpStart,     (ns_funcptr_t)Db_SpStart},
+    {DbFn_SpExec,      (ns_funcptr_t)Db_SpExec},
     {0, NULL}
 };
 
@@ -117,12 +125,12 @@ Ns_DbDriverInit(const char *hDriver, const char *configPath)
     return NS_OK;
 }
 
-static char *Db_Name(void)
+static const char   *Db_Name(void)
 {
     return freetds_driver_name;
 }
 
-static char *Db_DbType(Ns_DbHandle * handle)
+static const char *Db_DbType(Ns_DbHandle *handle)
 {
     return freetds_driver_name;
 }
@@ -167,7 +175,8 @@ static int Db_OpenDb(Ns_DbHandle *handle)
         tds_free_context(context);
         return NS_ERROR;
     }
-    tds_free_connection(connect);
+    //tds_free_connection(connect);
+    tds_free_login(connect);
     nsdb = (Db_Handle *) ns_malloc(sizeof(Db_Handle));
     nsdb->tds = tds;
     nsdb->login = login;
@@ -205,7 +214,7 @@ static int Db_IsDead(Ns_DbHandle *handle)
     return 0;
 }
 
-static int Db_Exec(Ns_DbHandle *handle, char *sql)
+static int Db_Exec(Ns_DbHandle *handle, const char *sql)
 {
     int status = TDS_SUCCESS, rc = NS_DML, done = 0;
     TDS_INT resulttype;
@@ -296,7 +305,7 @@ static int Db_GetRow(Ns_DbHandle *handle, Ns_Set *row)
     return NS_OK;
 }
 
-static int Db_Flush(Ns_DbHandle *handle)
+static Ns_ReturnCode Db_Flush(Ns_DbHandle *handle)
 {
     return Db_Cancel(handle);
 }
@@ -337,7 +346,7 @@ static Ns_Set *Db_BindRow(Ns_DbHandle *handle)
     return (Ns_Set *) handle->row;
 }
 
-static int Db_SpStart(Ns_DbHandle *handle, char *procname)
+static Ns_ReturnCode Db_SpStart(Ns_DbHandle *handle, const char *procname)
 {
     if (Db_Exec(handle, procname) != NS_ERROR) {
         return NS_OK;
@@ -425,15 +434,16 @@ static int Db_Cmd(ClientData arg, Tcl_Interp * interp, int objc, Tcl_Obj * CONST
     return TCL_OK;
 }
 
-static int Db_InterpInit(Tcl_Interp * interp, void *ignored)
+static Ns_TclTraceProc Db_InterpInit;
+
+static int Db_InterpInit(Tcl_Interp * interp, const void *UNUSED(ignored))
 {
     Tcl_CreateObjCommand(interp, "ns_freetds", Db_Cmd, NULL, NULL);
     return NS_OK;
 }
 
-
-static int Db_ServerInit(char *hServer, char *hModule, char *hDriver)
+extern Ns_ReturnCode Db_ServerInit(const char *server, const char *module, const char *driver)
 {
-    Ns_TclRegisterTrace(hServer, Db_InterpInit, NULL, NS_TCL_TRACE_CREATE);
+    Ns_TclRegisterTrace(server, Db_InterpInit, NULL, NS_TCL_TRACE_CREATE);
     return NS_OK;
 }

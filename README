@@ -5,11 +5,21 @@ vlad@crystalballinc.com
 This is NaviServer module that database driver to access 
 Sybase/MS SQL servers via FreeTDS(http://www.freetds.org).
 
-/*--------------------------------------------------------------------*/
-
+###########################################################
 Compiling and Installing
 
 To compile this driver, you'll need to have FreeTDS installed.
+
+You might get the freetds sources from
+
+     https://www.freetds.org/
+
+Compile and install it, and then in the nsfreetds directory
+build the DB interface with e.g.:
+
+    make FREETDS_HOME=/usr/local/src/freetds-1.4.23/
+
+###########################################################
 
 Configuration
 

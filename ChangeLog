@@ -36,7 +36,6 @@ Date:   2008-08-28
 
     Add new API call rowcount and function Ns_DbGetRowCount to return number of affected rows
 
-M	ChangeLog
 M	Makefile
 M	nsdbtds.c
 
@@ -54,7 +53,6 @@ Date:   2005-08-01
 
     Remove old compat functions
 
-M	ChangeLog
 M	nsdbtds.c
 
 commit d0fca2f5936e92605a4fbf37fca4dbea8a6eb93f
@@ -63,7 +61,6 @@ Date:   2005-06-17
 
     Rename files according to new nsdb convention
 
-A	ChangeLog
 M	Makefile
 R100	nsfreetds.c	nsdbtds.c
 
